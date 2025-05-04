@@ -2,12 +2,15 @@
   "name": "healthcare-chatbot",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "frontend": "npm run dev --workspace=frontend",
+    "backend": "npm run start --workspace=backend",
+    "dev": "concurrently \"npm run frontend\" \"npm run backend\"",
+    "build": "npm run build --workspace=frontend"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
@@ -26,6 +29,7 @@
     "globals": "^16.0.0",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.26.1",
-    "vite": "^6.3.1"
+    "vite": "^6.3.1",
+    "concurrently": "^8.2.2"
   }
 }

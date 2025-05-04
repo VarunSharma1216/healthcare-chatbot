@@ -1,3 +1,36 @@
+# Healthcare Chatbot
+
+A healthcare patient scheduling chatbot that matches patients with therapists based on their needs, specialty, and insurance.
+
+## Project Structure
+
+This project is organized into two main directories:
+
+- **frontend/**: React application for patient chat interface and admin dashboard
+- **backend/**: Supabase functions and database schema
+
+## Setup Instructions
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Backend
+
+```bash
+cd backend
+npm install
+supabase start
+```
+
+## Environment Variables
+
+Create `.env` files in both the frontend and backend directories with the required environment variables.
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
