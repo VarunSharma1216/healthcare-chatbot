@@ -1,0 +1,8 @@
+{
+  "importMap": "./import_map.json",
+  "compilerOptions": {
+    "lib": ["dom", "deno.ns", "deno.unstable"]
+  },
+  "fmt": { "useTabs": false, "lineWidth": 80 },
+  "lint": { "rules": { "tags": ["recommended"] } }
+}
