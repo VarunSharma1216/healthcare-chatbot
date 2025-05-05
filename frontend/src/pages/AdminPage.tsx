@@ -16,15 +16,67 @@ import {
   Chip,
   LinearProgress,
   Tab,
-  Tabs
+  Tabs,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  SelectChangeEvent,
+  CircularProgress,
+  Alert
 } from '@mui/material';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PersonIcon from '@mui/icons-material/Person';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EventIcon from '@mui/icons-material/Event';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import AddIcon from '@mui/icons-material/Add';
+import { supabase } from '../supabaseClient';
+
+// Define types based on database schema
+interface Therapist {
+  id: string;
+  name: string;
+  specialties: string[];
+  accepted_insurance: string[];
+  google_calendar_id?: string;
+  created_at: string;
+}
+
+interface Inquiry {
+  id: string;
+  patient_identifier: string | null;
+  problem_description: string;
+  requested_schedule: string;
+  insurance_info: string;
+  extracted_specialty: string | null;
+  matched_therapist_id: string | null;
+  status: string;
+  created_at: string;
+  // Join data
+  therapist?: Therapist;
+}
+
+interface Appointment {
+  id: string;
+  inquiry_id: string;
+  therapist_id: string;
+  patient_identifier: string | null;
+  start_time: string;
+  end_time: string;
+  google_calendar_event_id: string | null;
+  status: string;
+  created_at: string;
+  // Join data
+  therapist?: Therapist;
+  inquiry?: Inquiry;
+}
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -52,42 +104,201 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
+interface TherapistFormData {
+  name: string;
+  specialties: string;
+  accepted_insurance: string;
+}
+
 const AdminPage = () => {
   const [tabValue, setTabValue] = useState(0);
+  const [therapists, setTherapists] = useState<Therapist[]>([]);
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [counts, setCounts] = useState({
+    newInquiries: 0,
+    scheduledAppointments: 0,
+    activeTherapists: 0
+  });
+  
+  // Add therapist dialog state
+  const [openTherapistDialog, setOpenTherapistDialog] = useState(false);
+  const [therapistFormData, setTherapistFormData] = useState<TherapistFormData>({
+    name: '',
+    specialties: '',
+    accepted_insurance: ''
+  });
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
-  // Mock data for the prototype
-  const recentInquiries = [
-    { id: 1, patient: 'Sarah Johnson', issue: 'Anxiety and stress management', insurance: 'Blue Cross', status: 'pending' },
-    { id: 2, patient: 'Michael Chen', issue: 'Depression', insurance: 'Aetna', status: 'matched' },
-    { id: 3, patient: 'Emily Rodriguez', issue: 'Family counseling', insurance: 'United', status: 'scheduled' },
-    { id: 4, patient: 'David Kim', issue: 'Grief counseling', insurance: 'Kaiser', status: 'pending' },
-  ];
+  // Fetch data from Supabase on component mount
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-  const upcomingAppointments = [
-    { id: 1, patient: 'Michael Chen', therapist: 'Dr. Amanda Wilson', date: '2023-06-15', time: '10:00 AM', status: 'confirmed' },
-    { id: 2, patient: 'Emily Rodriguez', therapist: 'Dr. James Taylor', date: '2023-06-16', time: '2:30 PM', status: 'confirmed' },
-    { id: 3, patient: 'Lisa Park', therapist: 'Dr. Amanda Wilson', date: '2023-06-17', time: '11:15 AM', status: 'pending' },
-  ];
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Fetch therapists
+      const { data: therapistsData, error: therapistsError } = await supabase
+        .from('therapists')
+        .select('*');
+      
+      if (therapistsError) throw therapistsError;
+      
+      // Fetch inquiries with therapist join
+      const { data: inquiriesData, error: inquiriesError } = await supabase
+        .from('inquiries')
+        .select(`
+          *,
+          therapist:matched_therapist_id (
+            id,
+            name,
+            specialties
+          )
+        `);
+      
+      if (inquiriesError) throw inquiriesError;
+      
+      // Fetch appointments with therapist join
+      const { data: appointmentsData, error: appointmentsError } = await supabase
+        .from('appointments')
+        .select(`
+          *,
+          therapist:therapist_id (
+            id,
+            name,
+            specialties
+          ),
+          inquiry:inquiry_id (
+            id,
+            patient_identifier,
+            problem_description
+          )
+        `);
+      
+      if (appointmentsError) throw appointmentsError;
+      
+      // Update state with the fetched data
+      setTherapists(therapistsData || []);
+      setInquiries(inquiriesData || []);
+      setAppointments(appointmentsData || []);
+      
+      // Update counts
+      setCounts({
+        newInquiries: (inquiriesData || []).filter(inq => inq.status === 'pending').length,
+        scheduledAppointments: (appointmentsData || []).length,
+        activeTherapists: (therapistsData || []).length
+      });
+      
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      setError('Failed to load data. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const therapists = [
-    { id: 1, name: 'Dr. Amanda Wilson', specialties: ['Anxiety', 'Depression', 'PTSD'], patients: 12 },
-    { id: 2, name: 'Dr. James Taylor', specialties: ['Family Therapy', 'Couples Counseling'], patients: 8 },
-    { id: 3, name: 'Dr. Maria Gonzalez', specialties: ['Addiction', 'Trauma', 'Grief'], patients: 10 },
-  ];
+  const handleOpenTherapistDialog = () => {
+    setOpenTherapistDialog(true);
+  };
+
+  const handleCloseTherapistDialog = () => {
+    setOpenTherapistDialog(false);
+    setTherapistFormData({
+      name: '',
+      specialties: '',
+      accepted_insurance: ''
+    });
+  };
+
+  const handleTherapistFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setTherapistFormData({
+      ...therapistFormData,
+      [name]: value
+    });
+  };
+
+  const handleAddTherapist = async () => {
+    try {
+      // Parse comma-separated values into arrays
+      const specialtiesArray = therapistFormData.specialties
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => item !== '');
+      
+      const insuranceArray = therapistFormData.accepted_insurance
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => item !== '');
+      
+      const { data, error } = await supabase
+        .from('therapists')
+        .insert([
+          {
+            name: therapistFormData.name,
+            specialties: specialtiesArray,
+            accepted_insurance: insuranceArray
+          }
+        ])
+        .select();
+      
+      if (error) throw error;
+      
+      // Refresh data
+      fetchData();
+      
+      // Close dialog
+      handleCloseTherapistDialog();
+      
+    } catch (err) {
+      console.error('Error adding therapist:', err);
+      setError('Failed to add therapist. Please try again.');
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch(status) {
       case 'pending': return 'warning';
       case 'matched': return 'info';
-      case 'scheduled': return 'success';
+      case 'scheduled': 
       case 'confirmed': return 'success';
+      case 'failed': return 'error';
       default: return 'default';
     }
   };
+
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+  };
+
+  // Format time for display
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box 
@@ -98,7 +309,7 @@ const AdminPage = () => {
         pb: 6
       }}
     >
-      <Container maxWidth="lg">
+    <Container maxWidth="lg">
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {/* Header Section */}
           <Box>
@@ -117,8 +328,8 @@ const AdminPage = () => {
             >
               <Box>
                 <Typography variant="h4" component="h1" gutterBottom fontWeight={600}>
-                  Admin Dashboard
-                </Typography>
+          Admin Dashboard
+        </Typography>
                 <Typography variant="body1">
                   Manage patient inquiries, appointments, and therapist assignments
                 </Typography>
@@ -126,6 +337,7 @@ const AdminPage = () => {
               <Button 
                 variant="contained" 
                 startIcon={<AddIcon />}
+                onClick={handleOpenTherapistDialog}
                 sx={{ 
                   mt: {xs: 2, sm: 0},
                   backgroundColor: 'white',
@@ -137,6 +349,13 @@ const AdminPage = () => {
               </Button>
             </Paper>
           </Box>
+
+          {/* Error Alert */}
+          {error && (
+            <Alert severity="error" onClose={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
 
           {/* Statistics Cards */}
           <Box sx={{ 
@@ -151,13 +370,13 @@ const AdminPage = () => {
                     <AssignmentIcon />
                   </Avatar>
                   <Box>
-                    <Typography variant="h5" fontWeight="bold">12</Typography>
+                    <Typography variant="h5" fontWeight="bold">{counts.newInquiries}</Typography>
                     <Typography variant="body2" color="text.secondary">New Inquiries</Typography>
                   </Box>
                 </Box>
                 <LinearProgress 
                   variant="determinate" 
-                  value={65} 
+                  value={Math.min(counts.newInquiries * 10, 100)} 
                   sx={{ mt: 2, height: 8, borderRadius: 5 }} 
                 />
               </CardContent>
@@ -170,13 +389,13 @@ const AdminPage = () => {
                     <EventIcon />
                   </Avatar>
                   <Box>
-                    <Typography variant="h5" fontWeight="bold">8</Typography>
+                    <Typography variant="h5" fontWeight="bold">{counts.scheduledAppointments}</Typography>
                     <Typography variant="body2" color="text.secondary">Scheduled Appointments</Typography>
                   </Box>
                 </Box>
                 <LinearProgress 
                   variant="determinate" 
-                  value={40} 
+                  value={Math.min(counts.scheduledAppointments * 10, 100)} 
                   sx={{ mt: 2, height: 8, borderRadius: 5, '& .MuiLinearProgress-bar': { bgcolor: 'secondary.main' } }} 
                 />
               </CardContent>
@@ -189,13 +408,13 @@ const AdminPage = () => {
                     <MedicalServicesIcon />
                   </Avatar>
                   <Box>
-                    <Typography variant="h5" fontWeight="bold">5</Typography>
+                    <Typography variant="h5" fontWeight="bold">{counts.activeTherapists}</Typography>
                     <Typography variant="body2" color="text.secondary">Active Therapists</Typography>
                   </Box>
                 </Box>
                 <LinearProgress 
                   variant="determinate" 
-                  value={75} 
+                  value={Math.min(counts.activeTherapists * 20, 100)} 
                   sx={{ mt: 2, height: 8, borderRadius: 5, '& .MuiLinearProgress-bar': { bgcolor: '#4caf50' } }} 
                 />
               </CardContent>
@@ -220,120 +439,199 @@ const AdminPage = () => {
               
               {/* Inquiries Tab */}
               <TabPanel value={tabValue} index={0}>
-                <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
-                  {recentInquiries.map((inquiry) => (
-                    <Box key={inquiry.id}>
-                      <ListItem 
-                        alignItems="flex-start"
-                        secondaryAction={
-                          <Chip 
-                            label={inquiry.status} 
-                            color={getStatusColor(inquiry.status)}
-                            size="small"
-                          />
-                        }
-                      >
-                        <ListItemAvatar>
-                          <Avatar sx={{ bgcolor: 'primary.light' }}>
-                            <PersonIcon />
-                          </Avatar>
-                        </ListItemAvatar>
-                        <ListItemText
-                          primary={inquiry.patient}
-                          secondary={
-                            <>
-                              <Typography component="span" variant="body2" color="text.primary">
-                                {inquiry.issue}
-                              </Typography>
-                              {` — Insurance: ${inquiry.insurance}`}
-                            </>
+                {inquiries.length === 0 ? (
+                  <Typography align="center" color="text.secondary">No inquiries found</Typography>
+                ) : (
+                  <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+                    {inquiries.map((inquiry) => (
+                      <Box key={inquiry.id}>
+                        <ListItem 
+                          alignItems="flex-start"
+                          secondaryAction={
+                            <Chip 
+                              label={inquiry.status} 
+                              color={getStatusColor(inquiry.status)}
+                              size="small"
+                            />
                           }
-                        />
-                      </ListItem>
-                      <Divider variant="inset" component="li" />
-                    </Box>
-                  ))}
-                </List>
+                        >
+                          <ListItemAvatar>
+                            <Avatar sx={{ bgcolor: 'primary.light' }}>
+                              <PersonIcon />
+                            </Avatar>
+                          </ListItemAvatar>
+                          <ListItemText
+                            primary={inquiry.patient_identifier || 'Anonymous Patient'}
+                            secondary={
+                              <>
+                                <Typography component="span" variant="body2" color="text.primary">
+                                  {inquiry.problem_description}
+                                </Typography>
+                                <Typography component="span" variant="body2">
+                                  {` — Insurance: ${inquiry.insurance_info}`}
+                                </Typography>
+                                <Typography component="span" variant="body2" display="block">
+                                  {`Requested Schedule: ${inquiry.requested_schedule}`}
+                                </Typography>
+                                <Typography component="span" variant="body2" display="block" color="text.secondary">
+                                  {`Created: ${formatDate(inquiry.created_at)}`}
+        </Typography>
+                              </>
+                            }
+                          />
+                        </ListItem>
+                        <Divider variant="inset" component="li" />
+                      </Box>
+                    ))}
+                  </List>
+                )}
               </TabPanel>
               
               {/* Appointments Tab */}
               <TabPanel value={tabValue} index={1}>
-                <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
-                  {upcomingAppointments.map((appointment) => (
-                    <Box key={appointment.id}>
-                      <ListItem 
-                        alignItems="flex-start"
-                        secondaryAction={
-                          <Chip 
-                            label={appointment.status} 
-                            color={getStatusColor(appointment.status)}
-                            size="small"
-                          />
-                        }
-                      >
-                        <ListItemAvatar>
-                          <Avatar sx={{ bgcolor: 'secondary.light' }}>
-                            <AccessTimeIcon />
-                          </Avatar>
-                        </ListItemAvatar>
-                        <ListItemText
-                          primary={`${appointment.patient} with ${appointment.therapist}`}
-                          secondary={
-                            <>
-                              <Typography component="span" variant="body2" color="text.primary">
-                                {appointment.date} at {appointment.time}
-                              </Typography>
-                            </>
+                {appointments.length === 0 ? (
+                  <Typography align="center" color="text.secondary">No appointments found</Typography>
+                ) : (
+                  <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+                    {appointments.map((appointment) => (
+                      <Box key={appointment.id}>
+                        <ListItem 
+                          alignItems="flex-start"
+                          secondaryAction={
+                            <Chip 
+                              label={appointment.status} 
+                              color={getStatusColor(appointment.status)}
+                              size="small"
+                            />
                           }
-                        />
-                      </ListItem>
-                      <Divider variant="inset" component="li" />
-                    </Box>
-                  ))}
-                </List>
+                        >
+                          <ListItemAvatar>
+                            <Avatar sx={{ bgcolor: 'secondary.light' }}>
+                              <AccessTimeIcon />
+                            </Avatar>
+                          </ListItemAvatar>
+                          <ListItemText
+                            primary={`${appointment.patient_identifier || 'Anonymous Patient'} with ${appointment.therapist?.name || 'Unassigned'}`}
+                            secondary={
+                              <>
+                                <Typography component="span" variant="body2" color="text.primary">
+                                  {`${formatDate(appointment.start_time)} at ${formatTime(appointment.start_time)}`}
+                                </Typography>
+                                <Typography component="span" variant="body2" display="block" color="text.secondary">
+                                  {`Duration: ${Math.round((new Date(appointment.end_time).getTime() - new Date(appointment.start_time).getTime()) / (1000 * 60))} minutes`}
+          </Typography>
+                              </>
+                            }
+                          />
+                        </ListItem>
+                        <Divider variant="inset" component="li" />
+                      </Box>
+                    ))}
+                  </List>
+                )}
               </TabPanel>
               
               {/* Therapists Tab */}
               <TabPanel value={tabValue} index={2}>
-                <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
-                  {therapists.map((therapist) => (
-                    <Box key={therapist.id}>
-                      <ListItem alignItems="flex-start">
-                        <ListItemAvatar>
-                          <Avatar sx={{ bgcolor: '#4caf50' }}>
-                            <MedicalServicesIcon />
-                          </Avatar>
-                        </ListItemAvatar>
-                        <ListItemText
-                          primary={therapist.name}
-                          secondary={
-                            <>
-                              <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
-                                {therapist.specialties.map((specialty, idx) => (
-                                  <Chip 
-                                    key={idx} 
-                                    label={specialty} 
-                                    size="small" 
-                                    variant="outlined"
-                                  />
-                                ))}
-                              </Box>
-                              <Typography variant="body2" sx={{ mt: 1 }}>
-                                Active patients: {therapist.patients}
-                              </Typography>
-                            </>
-                          }
-                        />
-                      </ListItem>
-                      <Divider variant="inset" component="li" />
-                    </Box>
-                  ))}
-                </List>
+                {therapists.length === 0 ? (
+                  <Typography align="center" color="text.secondary">No therapists found</Typography>
+                ) : (
+                  <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+                    {therapists.map((therapist) => (
+                      <Box key={therapist.id}>
+                        <ListItem alignItems="flex-start">
+                          <ListItemAvatar>
+                            <Avatar sx={{ bgcolor: '#4caf50' }}>
+                              <MedicalServicesIcon />
+                            </Avatar>
+                          </ListItemAvatar>
+                          <ListItemText
+                            primary={therapist.name}
+                            secondary={
+                              <>
+                                <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                                  {therapist.specialties.map((specialty, idx) => (
+                                    <Chip 
+                                      key={idx} 
+                                      label={specialty} 
+                                      size="small" 
+                                      variant="outlined"
+                                    />
+                                  ))}
+                                </Box>
+                                <Typography variant="body2" sx={{ mt: 1 }}>
+                                  Accepted Insurance:
+          </Typography>
+                                <Box sx={{ display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
+                                  {therapist.accepted_insurance.map((insurance, idx) => (
+                                    <Chip 
+                                      key={idx} 
+                                      label={insurance} 
+                                      size="small" 
+                                      variant="outlined"
+                                      color="primary"
+                                    />
+                                  ))}
+                                </Box>
+                              </>
+                            }
+                          />
+                        </ListItem>
+                        <Divider variant="inset" component="li" />
+                      </Box>
+                    ))}
+                  </List>
+                )}
               </TabPanel>
-            </Paper>
+        </Paper>
           </Box>
-        </Box>
-      </Container>
+      </Box>
+    </Container>
+
+      {/* Add Therapist Dialog */}
+      <Dialog open={openTherapistDialog} onClose={handleCloseTherapistDialog}>
+        <DialogTitle>Add New Therapist</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <TextField
+              name="name"
+              label="Therapist Name"
+              variant="outlined"
+              fullWidth
+              value={therapistFormData.name}
+              onChange={handleTherapistFormChange}
+            />
+            <TextField
+              name="specialties"
+              label="Specialties (comma separated)"
+              variant="outlined"
+              fullWidth
+              value={therapistFormData.specialties}
+              onChange={handleTherapistFormChange}
+              helperText="E.g. anxiety, depression, trauma"
+            />
+            <TextField
+              name="accepted_insurance"
+              label="Accepted Insurance (comma separated)"
+              variant="outlined"
+              fullWidth
+              value={therapistFormData.accepted_insurance}
+              onChange={handleTherapistFormChange}
+              helperText="E.g. aetna, bluecross, united"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseTherapistDialog}>Cancel</Button>
+          <Button 
+            onClick={handleAddTherapist} 
+            variant="contained"
+            disabled={!therapistFormData.name || !therapistFormData.specialties || !therapistFormData.accepted_insurance}
+          >
+            Add Therapist
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
