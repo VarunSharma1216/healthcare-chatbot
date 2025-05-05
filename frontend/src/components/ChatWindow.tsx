@@ -65,11 +65,18 @@ interface Message {
   timestamp: Date;
 }
 
+// Define the ChatMessage type for OpenAI
+interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
 export default function ChatWindow() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -136,7 +143,10 @@ Could you please also tell me:
       const { data, error: supabaseError } = await supabase.functions.invoke(
         "handle-chat",
         {
-          body: JSON.stringify({ messageText: input }),
+          body: JSON.stringify({ 
+            messageText: input,
+            conversationHistory: conversationHistory 
+          }),
         }
       );
 
@@ -151,6 +161,11 @@ Could you please also tell me:
           ...m,
           { sender: "bot", text: data.reply as string, timestamp: new Date() } as Message,
         ]);
+        
+        // Update conversation history
+        if (data.conversationHistory) {
+          setConversationHistory(data.conversationHistory);
+        }
       }
     } catch (err) {
       console.error("Error sending message:", err);

@@ -11,6 +11,12 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+// Interface for OpenAI message
+interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
@@ -22,7 +28,7 @@ Deno.serve(async (req) => {
 
   try {
     // Parse the incoming JSON
-    const { messageText } = await req.json();
+    const { messageText, conversationHistory = [] } = await req.json();
 
     // Get OpenAI API key from environment variables
     const apiKey = Deno.env.get("OPENAI_API_KEY");
@@ -46,28 +52,43 @@ Deno.serve(async (req) => {
       apiKey: apiKey,
     });
 
+    // Prepare messages array with system prompt and conversation history
+    const messages: ChatMessage[] = [
+      {
+        role: "system",
+        content: "You are a helpful healthcare scheduling assistant. You help users find appropriate therapists based on their needs, preferences, and insurance. Be friendly, professional, and helpful. Ask follow-up questions to better understand their needs. Remember the information the user has shared previously."
+      },
+      ...conversationHistory,
+      {
+        role: "user",
+        content: messageText
+      }
+    ];
+
     // Call the OpenAI API
     const chatCompletion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo", // You can change this to gpt-4 if needed
-      messages: [
-        {
-          role: "system",
-          content: "You are a helpful healthcare scheduling assistant. You help users find appropriate therapists based on their needs, preferences, and insurance. Be friendly, professional, and helpful. Ask follow-up questions to better understand their needs."
-        },
-        {
-          role: "user",
-          content: messageText
-        }
-      ],
+      messages: messages,
       temperature: 0.7,
     });
 
     // Extract the response
-    const reply = chatCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't process your request.";
+    const assistantMessage = chatCompletion.choices[0]?.message;
+    const reply = assistantMessage?.content || "I'm sorry, I couldn't process your request.";
 
-    // Return the response
+    // Add the assistant's message to the conversation history
+    const updatedHistory = [
+      ...conversationHistory,
+      { role: "user", content: messageText },
+      { role: "assistant", content: reply }
+    ];
+
+    // Return the response with updated conversation history
     return new Response(
-      JSON.stringify({ reply }),
+      JSON.stringify({ 
+        reply,
+        conversationHistory: updatedHistory
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
     
