@@ -157,6 +157,7 @@ Could you please also tell me:
           { sender: "bot", text: "❌ Something went wrong. Please try again later.", timestamp: new Date() } as Message,
         ]);
       } else {
+        // Add the bot's response
         setMessages((m) => [
           ...m,
           { sender: "bot", text: data.reply as string, timestamp: new Date() } as Message,
@@ -165,6 +166,23 @@ Could you please also tell me:
         // Update conversation history
         if (data.conversationHistory) {
           setConversationHistory(data.conversationHistory);
+        }
+        
+        // Show notification if data was saved to Supabase
+        if (data.dataSaved) {
+          console.log("✅ Patient information saved to database:", data.savedData);
+          
+          // Add a system message to indicate the information was saved
+          setTimeout(() => {
+            setMessages((m) => [
+              ...m,
+              { 
+                sender: "bot", 
+                text: "✅ Your information has been saved and we're matching you with therapists. An administrator will contact you shortly with appointment options.", 
+                timestamp: new Date() 
+              } as Message,
+            ]);
+          }, 1000);
         }
       }
     } catch (err) {
