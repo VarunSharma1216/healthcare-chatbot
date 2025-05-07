@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
 2. requested_schedule: Their availability or preferred times for appointments
 3. insurance_info: Their insurance provider details
 4. extracted_specialty: Based on their problem, the type of specialist they need (you determine this)
+5. contact_info: Their email address or phone number for appointment confirmations
 
 After collecting ALL of this information, provide a summary in this format:
 "Here's the information I've collected:
@@ -79,10 +80,13 @@ After collecting ALL of this information, provide a summary in this format:
 - Schedule: [requested_schedule]
 - Insurance: [insurance_info]
 - Specialist Needed: [extracted_specialty]
+- Contact: [contact_info]
 
 Is this information correct? If so, I'll proceed with finding the right therapist for you. If not, please let me know what needs to be corrected."
 
 Be friendly, professional, and conversational. Ask follow-up questions until you have all the required information. Do not provide the summary until you have collected all the required information.
+
+Make sure to collect their contact information (email or phone) so they can be reached about their appointment.
 
 Remember the information the user has shared previously in the conversation.`
       },
@@ -155,18 +159,22 @@ Remember the information the user has shared previously in the conversation.`
         const scheduleMatch = summaryResponse.match(/Schedule: (.*?)(?:\r?\n|\r|$)/);
         const insuranceMatch = summaryResponse.match(/Insurance: (.*?)(?:\r?\n|\r|$)/);
         const specialtyMatch = summaryResponse.match(/Specialist Needed: (.*?)(?:\r?\n|\r|$)/);
+        const contactMatch = summaryResponse.match(/Contact: (.*?)(?:\r?\n|\r|$)/);
         
         console.log("🔍 Parsing results:");
         console.log("- Problem found:", !!problemMatch, problemMatch ? problemMatch[1] : "");
         console.log("- Schedule found:", !!scheduleMatch, scheduleMatch ? scheduleMatch[1] : "");
         console.log("- Insurance found:", !!insuranceMatch, insuranceMatch ? insuranceMatch[1] : "");
         console.log("- Specialty found:", !!specialtyMatch, specialtyMatch ? specialtyMatch[1] : "");
+        console.log("- Contact found:", !!contactMatch, contactMatch ? contactMatch[1] : "");
         
         if (problemMatch && scheduleMatch && insuranceMatch && specialtyMatch) {
           const problemDescription = problemMatch[1];
           const requestedSchedule = scheduleMatch[1];
           const insuranceInfo = insuranceMatch[1];
           const extractedSpecialty = specialtyMatch[1];
+          // Use contact info as patient_identifier if available, otherwise generate a unique ID
+          const patientIdentifier = contactMatch ? contactMatch[1] : `patient-${Date.now()}`;
           
           console.log("✅ All fields parsed successfully");
           console.log("📝 Patient Information:");
@@ -174,6 +182,7 @@ Remember the information the user has shared previously in the conversation.`
           console.log("- Schedule:", requestedSchedule);
           console.log("- Insurance:", insuranceInfo);
           console.log("- Specialty:", extractedSpecialty);
+          console.log("- Contact:", patientIdentifier);
           
           console.log("💾 Uploading to Supabase inquiries table...");
           // Insert the information into the inquiries table
@@ -181,7 +190,7 @@ Remember the information the user has shared previously in the conversation.`
             .from('inquiries')
             .insert([
               {
-                patient_identifier: `patient-${Date.now()}`,
+                patient_identifier: patientIdentifier,
                 problem_description: problemDescription,
                 requested_schedule: requestedSchedule,
                 insurance_info: insuranceInfo,
