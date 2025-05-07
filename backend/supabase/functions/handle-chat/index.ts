@@ -28,6 +28,13 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Initialize Supabase client with provided credentials
+    const supabaseUrl = "https://rhbbgmrqrnooljgperdd.supabase.co";
+    const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoYmJnbXJxcm5vb2xqZ3BlcmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYzMjY2NDIsImV4cCI6MjA2MTkwMjY0Mn0.ac7tAFgZs13esVqTcFZzRtIFioVv22KbjIrID1VJhlw";
+    
+    console.log("🔌 Initializing Supabase client...");
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
     // Parse the incoming JSON
     const { messageText, conversationHistory = [] } = await req.json();
     console.log("📩 Received message:", messageText.substring(0, 50) + (messageText.length > 50 ? "..." : ""));
@@ -62,6 +69,26 @@ Deno.serve(async (req) => {
     
     console.log(`📚 Found ${assistantResponses.length} previous assistant responses`);
 
+    // Fetch all therapists for matching
+    console.log("🔍 Fetching therapists for matching...");
+    const { data: therapists, error: therapistError } = await supabase
+      .from('therapists')
+      .select('*');
+
+    if (therapistError) {
+      console.error("❌ Error fetching therapists:", therapistError);
+    }
+
+    // Format therapists data for the prompt
+    const therapistsInfo = therapists ? therapists.map(t => ({
+      id: t.id,
+      name: t.name,
+      specialties: t.specialties,
+      accepted_insurance: t.accepted_insurance
+    })) : [];
+
+    console.log("📋 Available therapists:", JSON.stringify(therapistsInfo, null, 2));
+
     // Prepare messages array with system prompt and conversation history
     const messages: ChatMessage[] = [
       {
@@ -74,13 +101,22 @@ Deno.serve(async (req) => {
 4. extracted_specialty: Based on their problem, the type of specialist they need (you determine this)
 5. contact_info: Their email address or phone number for appointment confirmations
 
-After collecting ALL of this information, provide a summary in this format:
+Available therapists:
+${JSON.stringify(therapistsInfo, null, 2)}
+
+After collecting ALL of this information, analyze the patient's needs and match them with the most appropriate therapist from the available list. Consider:
+- The patient's specific problem and required specialty
+- The therapist's specialties and expertise
+- Insurance compatibility
+
+Provide a summary in this format:
 "Here's the information I've collected:
 - Problem: [problem_description]
 - Schedule: [requested_schedule]
 - Insurance: [insurance_info]
 - Specialist Needed: [extracted_specialty]
 - Contact: [contact_info]
+- Matched Therapist: [therapist_name] (if a match is found)
 
 Is this information correct? If so, I'll proceed with finding the right therapist for you. If not, please let me know what needs to be corrected."
 
@@ -108,19 +144,12 @@ Remember the information the user has shared previously in the conversation.`
 
     // Extract the response
     const assistantMessage = chatCompletion.choices[0]?.message;
-    const reply = assistantMessage?.content || "I'm sorry, I couldn't process your request.";
+    let reply = assistantMessage?.content || "I'm sorry, I couldn't process your request.";
     console.log("🤖 AI Response:", reply.substring(0, 50) + (reply.length > 50 ? "..." : ""));
 
     // Add current reply to the list of responses
     assistantResponses.push(reply);
 
-    // Initialize Supabase client with provided credentials
-    const supabaseUrl = "https://rhbbgmrqrnooljgperdd.supabase.co";
-    const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoYmJnbXJxcm5vb2xqZ3BlcmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYzMjY2NDIsImV4cCI6MjA2MTkwMjY0Mn0.ac7tAFgZs13esVqTcFZzRtIFioVv22KbjIrID1VJhlw";
-    
-    console.log("🔌 Initializing Supabase client...");
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    
     // Variable to track if data was saved
     let dataSaved = false;
     let savedData = null;
@@ -163,6 +192,7 @@ Remember the information the user has shared previously in the conversation.`
           const insuranceMatch = summaryResponse.match(/Insurance: (.*?)(?:\r?\n|\r|$)/);
           const specialtyMatch = summaryResponse.match(/Specialist Needed: (.*?)(?:\r?\n|\r|$)/);
           const contactMatch = summaryResponse.match(/Contact: (.*?)(?:\r?\n|\r|$)/);
+          const therapistMatch = summaryResponse.match(/Matched Therapist: (.*?)(?:\r?\n|\r|$)/);
           
           console.log("🔍 Parsing results:");
           console.log("- Problem found:", !!problemMatch, problemMatch ? problemMatch[1] : "");
@@ -170,6 +200,7 @@ Remember the information the user has shared previously in the conversation.`
           console.log("- Insurance found:", !!insuranceMatch, insuranceMatch ? insuranceMatch[1] : "");
           console.log("- Specialty found:", !!specialtyMatch, specialtyMatch ? specialtyMatch[1] : "");
           console.log("- Contact found:", !!contactMatch, contactMatch ? contactMatch[1] : "");
+          console.log("- Therapist found:", !!therapistMatch, therapistMatch ? therapistMatch[1] : "");
           
           if (problemMatch && scheduleMatch && insuranceMatch && specialtyMatch) {
             const problemDescription = problemMatch[1];
@@ -179,6 +210,23 @@ Remember the information the user has shared previously in the conversation.`
             // Use contact info as patient_identifier if available, otherwise generate a unique ID
             const patientIdentifier = contactMatch ? contactMatch[1] : `patient-${Date.now()}`;
             
+            // Find the matched therapist's name if a match was found
+            let matchedTherapistId: string | null = null;
+            if (therapistMatch) {
+              matchedTherapistId = therapistMatch[1].trim(); // Store the therapist's name directly
+              console.log("✅ Found matching therapist:", matchedTherapistId);
+              
+              // Verify the therapist exists in our database
+              const therapistExists = therapists?.some(t => t.name === matchedTherapistId);
+              console.log("🔍 Therapist exists in database:", therapistExists);
+              
+              if (!therapistExists) {
+                console.log("⚠️ Warning: Matched therapist not found in database");
+              }
+            } else {
+              console.log("ℹ️ No therapist match found in summary");
+            }
+            
             console.log("✅ All fields parsed successfully");
             console.log("📝 Patient Information:");
             console.log("- Problem:", problemDescription);
@@ -186,9 +234,10 @@ Remember the information the user has shared previously in the conversation.`
             console.log("- Insurance:", insuranceInfo);
             console.log("- Specialty:", extractedSpecialty);
             console.log("- Contact:", patientIdentifier);
+            console.log("- Matched Therapist:", matchedTherapistId);
             
             console.log("💾 Uploading to Supabase inquiries table...");
-            // Insert the information into the inquiries table
+            // Insert the information into the inquiries table with matched therapist
             const { data, error: insertError } = await supabase
               .from('inquiries')
               .insert([
@@ -198,7 +247,8 @@ Remember the information the user has shared previously in the conversation.`
                   requested_schedule: requestedSchedule,
                   insurance_info: insuranceInfo,
                   extracted_specialty: extractedSpecialty,
-                  status: 'pending'
+                  matched_therapist_id: matchedTherapistId,
+                  status: matchedTherapistId ? 'matched' : 'pending'
                 }
               ])
               .select();
@@ -209,6 +259,7 @@ Remember the information the user has shared previously in the conversation.`
             } else {
               console.log("✅ SUCCESS: Patient information uploaded to Supabase inquiries table");
               console.log("📊 New record ID:", data && data[0] ? data[0].id : "unknown");
+              console.log("📊 Matched Therapist ID in saved data:", data && data[0] ? data[0].matched_therapist_id : "none");
               dataSaved = true;
               savedData = data && data[0] ? data[0] : null;
             }
