@@ -153,68 +153,74 @@ Remember the information the user has shared previously in the conversation.`
     if (summaryResponse) {
       console.log("📋 Summary detected - attempting to parse and save to database");
       console.log("🔍 Summary content:", summaryResponse);
-      try {
-        // Extract information from the summary - updated regex patterns to match actual format
-        const problemMatch = summaryResponse.match(/Problem: (.*?)(?:\r?\n|\r|$)/);
-        const scheduleMatch = summaryResponse.match(/Schedule: (.*?)(?:\r?\n|\r|$)/);
-        const insuranceMatch = summaryResponse.match(/Insurance: (.*?)(?:\r?\n|\r|$)/);
-        const specialtyMatch = summaryResponse.match(/Specialist Needed: (.*?)(?:\r?\n|\r|$)/);
-        const contactMatch = summaryResponse.match(/Contact: (.*?)(?:\r?\n|\r|$)/);
-        
-        console.log("🔍 Parsing results:");
-        console.log("- Problem found:", !!problemMatch, problemMatch ? problemMatch[1] : "");
-        console.log("- Schedule found:", !!scheduleMatch, scheduleMatch ? scheduleMatch[1] : "");
-        console.log("- Insurance found:", !!insuranceMatch, insuranceMatch ? insuranceMatch[1] : "");
-        console.log("- Specialty found:", !!specialtyMatch, specialtyMatch ? specialtyMatch[1] : "");
-        console.log("- Contact found:", !!contactMatch, contactMatch ? contactMatch[1] : "");
-        
-        if (problemMatch && scheduleMatch && insuranceMatch && specialtyMatch) {
-          const problemDescription = problemMatch[1];
-          const requestedSchedule = scheduleMatch[1];
-          const insuranceInfo = insuranceMatch[1];
-          const extractedSpecialty = specialtyMatch[1];
-          // Use contact info as patient_identifier if available, otherwise generate a unique ID
-          const patientIdentifier = contactMatch ? contactMatch[1] : `patient-${Date.now()}`;
+      
+      // Only proceed with saving if this is a confirmation message
+      if (isConfirmation) {
+        try {
+          // Extract information from the summary - updated regex patterns to match actual format
+          const problemMatch = summaryResponse.match(/Problem: (.*?)(?:\r?\n|\r|$)/);
+          const scheduleMatch = summaryResponse.match(/Schedule: (.*?)(?:\r?\n|\r|$)/);
+          const insuranceMatch = summaryResponse.match(/Insurance: (.*?)(?:\r?\n|\r|$)/);
+          const specialtyMatch = summaryResponse.match(/Specialist Needed: (.*?)(?:\r?\n|\r|$)/);
+          const contactMatch = summaryResponse.match(/Contact: (.*?)(?:\r?\n|\r|$)/);
           
-          console.log("✅ All fields parsed successfully");
-          console.log("📝 Patient Information:");
-          console.log("- Problem:", problemDescription);
-          console.log("- Schedule:", requestedSchedule);
-          console.log("- Insurance:", insuranceInfo);
-          console.log("- Specialty:", extractedSpecialty);
-          console.log("- Contact:", patientIdentifier);
+          console.log("🔍 Parsing results:");
+          console.log("- Problem found:", !!problemMatch, problemMatch ? problemMatch[1] : "");
+          console.log("- Schedule found:", !!scheduleMatch, scheduleMatch ? scheduleMatch[1] : "");
+          console.log("- Insurance found:", !!insuranceMatch, insuranceMatch ? insuranceMatch[1] : "");
+          console.log("- Specialty found:", !!specialtyMatch, specialtyMatch ? specialtyMatch[1] : "");
+          console.log("- Contact found:", !!contactMatch, contactMatch ? contactMatch[1] : "");
           
-          console.log("💾 Uploading to Supabase inquiries table...");
-          // Insert the information into the inquiries table
-          const { data, error: insertError } = await supabase
-            .from('inquiries')
-            .insert([
-              {
-                patient_identifier: patientIdentifier,
-                problem_description: problemDescription,
-                requested_schedule: requestedSchedule,
-                insurance_info: insuranceInfo,
-                extracted_specialty: extractedSpecialty,
-                status: 'pending'
-              }
-            ])
-            .select();
-          
-          if (insertError) {
-            console.error("❌ Error inserting inquiry:", insertError);
-            console.error("❌ Error details:", JSON.stringify(insertError));
+          if (problemMatch && scheduleMatch && insuranceMatch && specialtyMatch) {
+            const problemDescription = problemMatch[1];
+            const requestedSchedule = scheduleMatch[1];
+            const insuranceInfo = insuranceMatch[1];
+            const extractedSpecialty = specialtyMatch[1];
+            // Use contact info as patient_identifier if available, otherwise generate a unique ID
+            const patientIdentifier = contactMatch ? contactMatch[1] : `patient-${Date.now()}`;
+            
+            console.log("✅ All fields parsed successfully");
+            console.log("📝 Patient Information:");
+            console.log("- Problem:", problemDescription);
+            console.log("- Schedule:", requestedSchedule);
+            console.log("- Insurance:", insuranceInfo);
+            console.log("- Specialty:", extractedSpecialty);
+            console.log("- Contact:", patientIdentifier);
+            
+            console.log("💾 Uploading to Supabase inquiries table...");
+            // Insert the information into the inquiries table
+            const { data, error: insertError } = await supabase
+              .from('inquiries')
+              .insert([
+                {
+                  patient_identifier: patientIdentifier,
+                  problem_description: problemDescription,
+                  requested_schedule: requestedSchedule,
+                  insurance_info: insuranceInfo,
+                  extracted_specialty: extractedSpecialty,
+                  status: 'pending'
+                }
+              ])
+              .select();
+            
+            if (insertError) {
+              console.error("❌ Error inserting inquiry:", insertError);
+              console.error("❌ Error details:", JSON.stringify(insertError));
+            } else {
+              console.log("✅ SUCCESS: Patient information uploaded to Supabase inquiries table");
+              console.log("📊 New record ID:", data && data[0] ? data[0].id : "unknown");
+              dataSaved = true;
+              savedData = data && data[0] ? data[0] : null;
+            }
           } else {
-            console.log("✅ SUCCESS: Patient information uploaded to Supabase inquiries table");
-            console.log("📊 New record ID:", data && data[0] ? data[0].id : "unknown");
-            dataSaved = true;
-            savedData = data && data[0] ? data[0] : null;
+            console.error("❌ Some fields couldn't be parsed from the summary");
           }
-        } else {
-          console.error("❌ Some fields couldn't be parsed from the summary");
+        } catch (error) {
+          console.error("❌ Error parsing or saving inquiry:", error);
+          console.error("❌ Error details:", JSON.stringify(error));
         }
-      } catch (error) {
-        console.error("❌ Error parsing or saving inquiry:", error);
-        console.error("❌ Error details:", JSON.stringify(error));
+      } else {
+        console.log("ℹ️ Summary found but waiting for user confirmation before saving");
       }
     } else {
       console.log("ℹ️ No summary found in any messages - still collecting information");
