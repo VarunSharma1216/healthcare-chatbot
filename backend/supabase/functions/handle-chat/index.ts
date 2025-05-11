@@ -3,7 +3,6 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { OpenAI } from "https://esm.sh/openai@4.20.1";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.5.0";
 
-console.log("📡 handle-chat function loaded");
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -29,9 +28,13 @@ Deno.serve(async (req) => {
 
   try {
     // Initialize Supabase client with provided credentials
-    const supabaseUrl = "https://rhbbgmrqrnooljgperdd.supabase.co";
-    const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoYmJnbXJxcm5vb2xqZ3BlcmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYzMjY2NDIsImV4cCI6MjA2MTkwMjY0Mn0.ac7tAFgZs13esVqTcFZzRtIFioVv22KbjIrID1VJhlw";
-    
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error('SUPABASE_URL or SUPABASE_ANON_KEY environment variables are not set.');
+    }
+
     console.log("🔌 Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -89,6 +92,30 @@ Deno.serve(async (req) => {
 
     console.log("📋 Available therapists:", JSON.stringify(therapistsInfo, null, 2));
 
+    // --- NEW LOGIC: If a therapist was matched in the last assistant response, fetch their calendar and append to user message ---
+    let userMessage = messageText;
+    // Look for a matched therapist in the last assistant response
+    const lastAssistant = assistantResponses.length > 0 ? assistantResponses[assistantResponses.length - 1] : '';
+    const therapistMatch = lastAssistant.match(/Matched Therapist:\s*([^\n\r]+)/i);
+    console.log("🔍 Therapist match for handle-calendar:", therapistMatch);
+    if (therapistMatch) {
+     
+        // Call handle-calendar and get available times
+        try {
+          console.log("🔍 Calling handle-calendar...");
+          const { data: calendarEvents } = await supabase.functions.invoke('handle-calendar');
+          console.log("Calling handle-calendar complete");
+          console.log("🔍 Calendar events:", calendarEvents);
+          if (calendarEvents && Array.isArray(calendarEvents)) {
+            // Feed ChatGPT the raw calendar events
+            userMessage += `\nThese are the times that the therapist is available: ${JSON.stringify(calendarEvents)}`;
+          }
+        } catch (err) {
+          console.error("❌ Error fetching calendar events:", err);
+          userMessage += `\nThere was an error fetching the therapist's availability.`;
+        }
+    }
+
     // Prepare messages array with system prompt and conversation history
     const messages: ChatMessage[] = [
       {
@@ -112,9 +139,6 @@ After collecting ALL of this information, analyze the patient's needs and match 
 IMPORTANT: When presenting the matched therapist, ALWAYS use this exact format:
 "Matched Therapist: [therapist_name]"
 
-For example:
-"Matched Therapist: Alice Johnson"
-
 Then explain why they are a good match, but ALWAYS start with the exact "Matched Therapist: [name]" format.
 
 Provide a summary in this format:
@@ -137,7 +161,7 @@ Remember the information the user has shared previously in the conversation.`
       ...conversationHistory,
       {
         role: "user",
-        content: messageText
+        content: userMessage
       }
     ];
 
