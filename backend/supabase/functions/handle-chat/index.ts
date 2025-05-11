@@ -109,6 +109,14 @@ After collecting ALL of this information, analyze the patient's needs and match 
 - The therapist's specialties and expertise
 - Insurance compatibility
 
+IMPORTANT: When presenting the matched therapist, ALWAYS use this exact format:
+"Matched Therapist: [therapist_name]"
+
+For example:
+"Matched Therapist: Alice Johnson"
+
+Then explain why they are a good match, but ALWAYS start with the exact "Matched Therapist: [name]" format.
+
 Provide a summary in this format:
 "Here's the information I've collected:
 - Problem: [problem_description]
@@ -192,7 +200,10 @@ Remember the information the user has shared previously in the conversation.`
           const insuranceMatch = summaryResponse.match(/Insurance: (.*?)(?:\r?\n|\r|$)/);
           const specialtyMatch = summaryResponse.match(/Specialist Needed: (.*?)(?:\r?\n|\r|$)/);
           const contactMatch = summaryResponse.match(/Contact: (.*?)(?:\r?\n|\r|$)/);
-          const therapistMatch = summaryResponse.match(/Matched Therapist: (.*?)(?:\r?\n|\r|$)/);
+          
+          // Updated therapist matching regex to handle the specific format
+          const therapistMatch = summaryResponse.match(/Matched Therapist:\s*([^\n\r]+)/i) || 
+                               summaryResponse.match(/Matched Therapist:\s*\n\s*([^\n\r]+)/i);
           
           console.log("🔍 Parsing results:");
           console.log("- Problem found:", !!problemMatch, problemMatch ? problemMatch[1] : "");
@@ -201,6 +212,7 @@ Remember the information the user has shared previously in the conversation.`
           console.log("- Specialty found:", !!specialtyMatch, specialtyMatch ? specialtyMatch[1] : "");
           console.log("- Contact found:", !!contactMatch, contactMatch ? contactMatch[1] : "");
           console.log("- Therapist found:", !!therapistMatch, therapistMatch ? therapistMatch[1] : "");
+          console.log("🔍 Full summary for debugging:", summaryResponse);
           
           if (problemMatch && scheduleMatch && insuranceMatch && specialtyMatch) {
             const problemDescription = problemMatch[1];
@@ -222,6 +234,14 @@ Remember the information the user has shared previously in the conversation.`
               
               if (!therapistExists) {
                 console.log("⚠️ Warning: Matched therapist not found in database");
+                // Try to find a case-insensitive match
+                const caseInsensitiveMatch = therapists?.find(t => 
+                  t.name.toLowerCase() === matchedTherapistId?.toLowerCase()
+                );
+                if (caseInsensitiveMatch) {
+                  console.log("✅ Found case-insensitive match:", caseInsensitiveMatch.name);
+                  matchedTherapistId = caseInsensitiveMatch.name;
+                }
               }
             } else {
               console.log("ℹ️ No therapist match found in summary");
@@ -236,32 +256,37 @@ Remember the information the user has shared previously in the conversation.`
             console.log("- Contact:", patientIdentifier);
             console.log("- Matched Therapist:", matchedTherapistId);
             
-            console.log("💾 Uploading to Supabase inquiries table...");
-            // Insert the information into the inquiries table with matched therapist
-            const { data, error: insertError } = await supabase
-              .from('inquiries')
-              .insert([
-                {
-                  patient_identifier: patientIdentifier,
-                  problem_description: problemDescription,
-                  requested_schedule: requestedSchedule,
-                  insurance_info: insuranceInfo,
-                  extracted_specialty: extractedSpecialty,
-                  matched_therapist_id: matchedTherapistId,
-                  status: matchedTherapistId ? 'matched' : 'pending'
-                }
-              ])
-              .select();
-            
-            if (insertError) {
-              console.error("❌ Error inserting inquiry:", insertError);
-              console.error("❌ Error details:", JSON.stringify(insertError));
+            // Only save if we have a confirmed match
+            if (matchedTherapistId) {
+              console.log("💾 Uploading to Supabase inquiries table...");
+              // Insert the information into the inquiries table with matched therapist
+              const { data, error: insertError } = await supabase
+                .from('inquiries')
+                .insert([
+                  {
+                    patient_identifier: patientIdentifier,
+                    problem_description: problemDescription,
+                    requested_schedule: requestedSchedule,
+                    insurance_info: insuranceInfo,
+                    extracted_specialty: extractedSpecialty,
+                    matched_therapist_id: matchedTherapistId,
+                    status: 'matched'
+                  }
+                ])
+                .select();
+              
+              if (insertError) {
+                console.error("❌ Error inserting inquiry:", insertError);
+                console.error("❌ Error details:", JSON.stringify(insertError));
+              } else {
+                console.log("✅ SUCCESS: Patient information uploaded to Supabase inquiries table");
+                console.log("📊 New record ID:", data && data[0] ? data[0].id : "unknown");
+                console.log("📊 Matched Therapist ID in saved data:", data && data[0] ? data[0].matched_therapist_id : "none");
+                dataSaved = true;
+                savedData = data && data[0] ? data[0] : null;
+              }
             } else {
-              console.log("✅ SUCCESS: Patient information uploaded to Supabase inquiries table");
-              console.log("📊 New record ID:", data && data[0] ? data[0].id : "unknown");
-              console.log("📊 Matched Therapist ID in saved data:", data && data[0] ? data[0].matched_therapist_id : "none");
-              dataSaved = true;
-              savedData = data && data[0] ? data[0] : null;
+              console.log("⚠️ No therapist match found - not saving to database yet");
             }
           } else {
             console.error("❌ Some fields couldn't be parsed from the summary");

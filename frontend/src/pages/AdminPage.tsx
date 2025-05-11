@@ -155,14 +155,7 @@ const AdminPage = () => {
       // Fetch inquiries with therapist join
       const { data: inquiriesData, error: inquiriesError } = await supabase
         .from('inquiries')
-        .select(`
-          *,
-          therapist:matched_therapist_id (
-            id,
-            name,
-            specialties
-          )
-        `);
+        .select('*');
       
       if (inquiriesError) throw inquiriesError;
       
