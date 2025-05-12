@@ -37,6 +37,7 @@ import EventIcon from '@mui/icons-material/Event';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import AddIcon from '@mui/icons-material/Add';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import { supabase } from '../supabaseClient';
 
 // Define types based on database schema
@@ -46,6 +47,7 @@ interface Therapist {
   specialties: string[];
   accepted_insurance: string[];
   google_calendar_id?: string;
+  google_refresh_token?: string;
   created_at: string;
 }
 
@@ -130,6 +132,8 @@ const AdminPage = () => {
     specialties: '',
     accepted_insurance: ''
   });
+
+  const [connectingCalendar, setConnectingCalendar] = useState<string | null>(null);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -283,6 +287,50 @@ const AdminPage = () => {
       hour: '2-digit', 
       minute: '2-digit' 
     });
+  };
+
+  const handleConnectCalendar = async (therapistId: string) => {
+    try {
+      setConnectingCalendar(therapistId);
+      
+      // Get the current session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!session) throw new Error('No active session');
+
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+      if (!supabaseAnonKey) {
+        throw new Error('Missing Supabase anon key');
+      }
+
+      const response = await fetch('https://rhbbgmrqrnooljgperdd.supabase.co/functions/v1/handle-oauth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': supabaseAnonKey
+        },
+        body: JSON.stringify({ therapistId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('Calendar connection error:', errorData);
+        throw new Error(`Failed to initiate calendar connection: ${errorData}`);
+      }
+
+      const { oauthUrl } = await response.json();
+      if (!oauthUrl) {
+        throw new Error('No OAuth URL received from server');
+      }
+
+      window.location.href = oauthUrl;
+    } catch (err) {
+      console.error('Error connecting calendar:', err);
+      setError(err instanceof Error ? err.message : 'Failed to connect calendar. Please try again.');
+    } finally {
+      setConnectingCalendar(null);
+    }
   };
 
   if (loading) {
@@ -569,6 +617,15 @@ const AdminPage = () => {
                               </>
                             }
                           />
+                          <Button
+                            variant="outlined"
+                            startIcon={<CalendarMonthIcon />}
+                            onClick={() => handleConnectCalendar(therapist.id)}
+                            disabled={!!connectingCalendar}
+                            sx={{ ml: 2 }}
+                          >
+                            {therapist.google_refresh_token ? 'Reconnect Calendar' : 'Connect Calendar'}
+                          </Button>
                         </ListItem>
                         <Divider variant="inset" component="li" />
                       </Box>

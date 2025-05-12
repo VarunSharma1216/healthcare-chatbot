@@ -1,0 +1,2 @@
+[functions.handle-oauth]
+verify_jwt = false 
