@@ -29,8 +29,11 @@ Deno.serve(async (req) => {
 
   try {
     // Initialize Supabase client with provided credentials
-    const supabaseUrl = "https://rhbbgmrqrnooljgperdd.supabase.co";
-    const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoYmJnbXJxcm5vb2xqZ3BlcmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYzMjY2NDIsImV4cCI6MjA2MTkwMjY0Mn0.ac7tAFgZs13esVqTcFZzRtIFioVv22KbjIrID1VJhlw";
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY environment variables are required');
+    }
     
     console.log("🔌 Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -311,7 +314,9 @@ Remember the information the user has shared previously in the conversation.`
                       'Content-Type': 'application/json',
                       'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`
                     },
-                    body: JSON.stringify({})
+                    body: JSON.stringify({
+                      therapistId: matchedTherapistId
+                    })
                   });
 
                   console.log("📅 Calendar response status:", calendarResponse.status);
