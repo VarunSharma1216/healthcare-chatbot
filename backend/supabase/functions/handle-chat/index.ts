@@ -3,6 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { OpenAI } from "https://esm.sh/openai@4.20.1";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.5.0";
 
+console.log("📡 handle-chat function loaded");
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -28,13 +29,9 @@ Deno.serve(async (req) => {
 
   try {
     // Initialize Supabase client with provided credentials
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error('SUPABASE_URL or SUPABASE_ANON_KEY environment variables are not set.');
-    }
-
+    const supabaseUrl = "https://rhbbgmrqrnooljgperdd.supabase.co";
+    const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoYmJnbXJxcm5vb2xqZ3BlcmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYzMjY2NDIsImV4cCI6MjA2MTkwMjY0Mn0.ac7tAFgZs13esVqTcFZzRtIFioVv22KbjIrID1VJhlw";
+    
     console.log("🔌 Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -87,34 +84,11 @@ Deno.serve(async (req) => {
       id: t.id,
       name: t.name,
       specialties: t.specialties,
-      accepted_insurance: t.accepted_insurance
+      accepted_insurance: t.accepted_insurance,
+      email: t.email
     })) : [];
 
     console.log("📋 Available therapists:", JSON.stringify(therapistsInfo, null, 2));
-
-    // --- NEW LOGIC: If a therapist was matched in the last assistant response, fetch their calendar and append to user message ---
-    let userMessage = messageText;
-    // Look for a matched therapist in the last assistant response
-    const lastAssistant = assistantResponses.length > 0 ? assistantResponses[assistantResponses.length - 1] : '';
-    const therapistMatch = lastAssistant.match(/Matched Therapist:\s*([^\n\r]+)/i);
-    console.log("🔍 Therapist match for handle-calendar:", therapistMatch);
-    if (therapistMatch) {
-     
-        // Call handle-calendar and get available times
-        try {
-          console.log("🔍 Calling handle-calendar...");
-          const { data: calendarEvents } = await supabase.functions.invoke('handle-calendar');
-          console.log("Calling handle-calendar complete");
-          console.log("🔍 Calendar events:", calendarEvents);
-          if (calendarEvents && Array.isArray(calendarEvents)) {
-            // Feed ChatGPT the raw calendar events
-            userMessage += `\nThese are the times that the therapist is available: ${JSON.stringify(calendarEvents)}`;
-          }
-        } catch (err) {
-          console.error("❌ Error fetching calendar events:", err);
-          userMessage += `\nThere was an error fetching the therapist's availability.`;
-        }
-    }
 
     // Prepare messages array with system prompt and conversation history
     const messages: ChatMessage[] = [
@@ -136,10 +110,8 @@ After collecting ALL of this information, analyze the patient's needs and match 
 - The therapist's specialties and expertise
 - Insurance compatibility
 
-IMPORTANT: When presenting the matched therapist, ALWAYS use this exact format:
-"Matched Therapist: [therapist_name]"
-
-Then explain why they are a good match, but ALWAYS start with the exact "Matched Therapist: [name]" format.
+IMPORTANT: You MUST select a therapist from the available list above. Do not make up or suggest therapists that are not in the list.
+If no therapist matches perfectly, choose the closest match based on specialty and insurance.
 
 Provide a summary in this format:
 "Here's the information I've collected:
@@ -148,7 +120,7 @@ Provide a summary in this format:
 - Insurance: [insurance_info]
 - Specialist Needed: [extracted_specialty]
 - Contact: [contact_info]
-- Matched Therapist: [therapist_name] (if a match is found)
+- Matched Therapist: [therapist_name] (MUST be one of the therapists listed above)
 
 Is this information correct? If so, I'll proceed with finding the right therapist for you. If not, please let me know what needs to be corrected."
 
@@ -161,7 +133,7 @@ Remember the information the user has shared previously in the conversation.`
       ...conversationHistory,
       {
         role: "user",
-        content: userMessage
+        content: messageText
       }
     ];
 
@@ -224,10 +196,7 @@ Remember the information the user has shared previously in the conversation.`
           const insuranceMatch = summaryResponse.match(/Insurance: (.*?)(?:\r?\n|\r|$)/);
           const specialtyMatch = summaryResponse.match(/Specialist Needed: (.*?)(?:\r?\n|\r|$)/);
           const contactMatch = summaryResponse.match(/Contact: (.*?)(?:\r?\n|\r|$)/);
-          
-          // Updated therapist matching regex to handle the specific format
-          const therapistMatch = summaryResponse.match(/Matched Therapist:\s*([^\n\r]+)/i) || 
-                               summaryResponse.match(/Matched Therapist:\s*\n\s*([^\n\r]+)/i);
+          const therapistMatch = summaryResponse.match(/Matched Therapist: (.*?)(?:\r?\n|\r|$)/);
           
           console.log("🔍 Parsing results:");
           console.log("- Problem found:", !!problemMatch, problemMatch ? problemMatch[1] : "");
@@ -236,7 +205,6 @@ Remember the information the user has shared previously in the conversation.`
           console.log("- Specialty found:", !!specialtyMatch, specialtyMatch ? specialtyMatch[1] : "");
           console.log("- Contact found:", !!contactMatch, contactMatch ? contactMatch[1] : "");
           console.log("- Therapist found:", !!therapistMatch, therapistMatch ? therapistMatch[1] : "");
-          console.log("🔍 Full summary for debugging:", summaryResponse);
           
           if (problemMatch && scheduleMatch && insuranceMatch && specialtyMatch) {
             const problemDescription = problemMatch[1];
@@ -248,27 +216,50 @@ Remember the information the user has shared previously in the conversation.`
             
             // Find the matched therapist's name if a match was found
             let matchedTherapistId: string | null = null;
+            let matchedTherapistName: string | null = null;
             if (therapistMatch) {
-              matchedTherapistId = therapistMatch[1].trim(); // Store the therapist's name directly
-              console.log("✅ Found matching therapist:", matchedTherapistId);
+              const therapistName = therapistMatch[1].trim();
+              console.log("🔍 Looking for therapist:", therapistName);
               
-              // Verify the therapist exists in our database
-              const therapistExists = therapists?.some(t => t.name === matchedTherapistId);
-              console.log("🔍 Therapist exists in database:", therapistExists);
+              // Find the therapist in our database
+              const matchedTherapist = therapists?.find(t => t.name.toLowerCase() === therapistName.toLowerCase());
+              console.log("🔍 Found therapist in database:", matchedTherapist);
               
-              if (!therapistExists) {
+              if (matchedTherapist) {
+                matchedTherapistId = matchedTherapist.id;
+                matchedTherapistName = matchedTherapist.name;
+                console.log("✅ Matched therapist ID:", matchedTherapistId);
+              } else {
                 console.log("⚠️ Warning: Matched therapist not found in database");
-                // Try to find a case-insensitive match
-                const caseInsensitiveMatch = therapists?.find(t => 
-                  t.name.toLowerCase() === matchedTherapistId?.toLowerCase()
+                // Try to find a therapist with matching specialty and insurance
+                const alternativeMatch = therapists?.find(t => 
+                  t.specialties?.toLowerCase().includes(extractedSpecialty.toLowerCase()) &&
+                  t.accepted_insurance?.toLowerCase().includes(insuranceInfo.toLowerCase())
                 );
-                if (caseInsensitiveMatch) {
-                  console.log("✅ Found case-insensitive match:", caseInsensitiveMatch.name);
-                  matchedTherapistId = caseInsensitiveMatch.name;
+                
+                if (alternativeMatch) {
+                  matchedTherapistId = alternativeMatch.id;
+                  matchedTherapistName = alternativeMatch.name;
+                  console.log("✅ Found alternative match:", alternativeMatch.name);
+                  // Update the reply to reflect the alternative match
+                  reply = reply.replace(therapistName, alternativeMatch.name);
                 }
               }
             } else {
               console.log("ℹ️ No therapist match found in summary");
+              // Try to find a therapist with matching specialty and insurance
+              const alternativeMatch = therapists?.find(t => 
+                t.specialties?.toLowerCase().includes(extractedSpecialty.toLowerCase()) &&
+                t.accepted_insurance?.toLowerCase().includes(insuranceInfo.toLowerCase())
+              );
+              
+              if (alternativeMatch) {
+                matchedTherapistId = alternativeMatch.id;
+                matchedTherapistName = alternativeMatch.name;
+                console.log("✅ Found alternative match:", alternativeMatch.name);
+                // Update the reply to include the matched therapist
+                reply += `\n\nI've matched you with ${alternativeMatch.name} based on your needs and insurance.`;
+              }
             }
             
             console.log("✅ All fields parsed successfully");
@@ -280,37 +271,75 @@ Remember the information the user has shared previously in the conversation.`
             console.log("- Contact:", patientIdentifier);
             console.log("- Matched Therapist:", matchedTherapistId);
             
-            // Only save if we have a confirmed match
-            if (matchedTherapistId) {
-              console.log("💾 Uploading to Supabase inquiries table...");
-              // Insert the information into the inquiries table with matched therapist
-              const { data, error: insertError } = await supabase
-                .from('inquiries')
-                .insert([
-                  {
-                    patient_identifier: patientIdentifier,
-                    problem_description: problemDescription,
-                    requested_schedule: requestedSchedule,
-                    insurance_info: insuranceInfo,
-                    extracted_specialty: extractedSpecialty,
-                    matched_therapist_id: matchedTherapistId,
-                    status: 'matched'
-                  }
-                ])
-                .select();
-              
-              if (insertError) {
-                console.error("❌ Error inserting inquiry:", insertError);
-                console.error("❌ Error details:", JSON.stringify(insertError));
-              } else {
-                console.log("✅ SUCCESS: Patient information uploaded to Supabase inquiries table");
-                console.log("📊 New record ID:", data && data[0] ? data[0].id : "unknown");
-                console.log("📊 Matched Therapist ID in saved data:", data && data[0] ? data[0].matched_therapist_id : "none");
-                dataSaved = true;
-                savedData = data && data[0] ? data[0] : null;
-              }
+            console.log("💾 Uploading to Supabase inquiries table...");
+            // Insert the information into the inquiries table with matched therapist
+            const { data, error: insertError } = await supabase
+              .from('inquiries')
+              .insert([
+                {
+                  patient_identifier: patientIdentifier,
+                  problem_description: problemDescription,
+                  requested_schedule: requestedSchedule,
+                  insurance_info: insuranceInfo,
+                  extracted_specialty: extractedSpecialty,
+                  matched_therapist_id: matchedTherapistId,
+                  status: matchedTherapistId ? 'matched' : 'pending'
+                }
+              ])
+              .select();
+            
+            if (insertError) {
+              console.error("❌ Error inserting inquiry:", insertError);
+              console.error("❌ Error details:", JSON.stringify(insertError));
             } else {
-              console.log("⚠️ No therapist match found - not saving to database yet");
+              console.log("✅ SUCCESS: Patient information uploaded to Supabase inquiries table");
+              console.log("📊 New record ID:", data && data[0] ? data[0].id : "unknown");
+              console.log("📊 Matched Therapist ID in saved data:", data && data[0] ? data[0].matched_therapist_id : "none");
+              dataSaved = true;
+              savedData = data && data[0] ? data[0] : null;
+
+              // If we have a matched therapist, try to book the calendar event
+              if (matchedTherapistId) {
+                try {
+                  console.log("📅 Attempting to book calendar event...");
+                  console.log("📅 Calling handle-calendar function...");
+                  
+                  // Call the handle-calendar function
+                  const calendarResponse = await fetch('https://rhbbgmrqrnooljgperdd.supabase.co/functions/v1/handle-calendar', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`
+                    },
+                    body: JSON.stringify({})
+                  });
+
+                  console.log("📅 Calendar response status:", calendarResponse.status);
+                  const responseText = await calendarResponse.text();
+                  console.log("📅 Calendar response text:", responseText);
+                  
+                  let calendarResult;
+                  try {
+                    calendarResult = JSON.parse(responseText);
+                  } catch (e) {
+                    console.error("❌ Error parsing calendar response:", e);
+                    throw new Error("Invalid response from calendar function");
+                  }
+
+                  console.log("📅 Calendar booking result:", calendarResult);
+
+                  if (calendarResult.success) {
+                    // Update the reply to include calendar confirmation
+                    reply += `\n\nI've scheduled your appointment with ${matchedTherapistName} for May 15, 2025 at 4:00 PM. You'll receive a calendar invitation shortly.`;
+                  } else {
+                    console.error("❌ Error booking calendar:", calendarResult.error);
+                    reply += `\n\nI've matched you with ${matchedTherapistName}, but there was an issue scheduling the calendar event. Please contact the office directly to confirm your appointment time.`;
+                  }
+                } catch (error) {
+                  console.error("❌ Error in calendar booking process:", error);
+                  reply += `\n\nI've matched you with ${matchedTherapistName}, but there was an issue scheduling the calendar event. Please contact the office directly to confirm your appointment time.`;
+                }
+              }
             }
           } else {
             console.error("❌ Some fields couldn't be parsed from the summary");

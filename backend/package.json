@@ -10,7 +10,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
-    "node-fetch": "^2.7.0"
+    "express": "^5.1.0",
+    "googleapis": "^148.0.0",
+    "node-fetch": "^2.7.0",
+    "open": "^10.1.2",
+    "server-destroy": "^1.0.1"
   },
   "devDependencies": {
     "supabase": "^1.133.4",

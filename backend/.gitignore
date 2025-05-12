@@ -1,4 +1,8 @@
 .env
+
+
+test-add-event.js
+
 # Logs
 logs
 *.log
